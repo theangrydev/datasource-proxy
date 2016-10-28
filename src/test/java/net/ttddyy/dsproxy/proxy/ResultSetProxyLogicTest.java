@@ -8,6 +8,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -56,6 +57,10 @@ public class ResultSetProxyLogicTest {
     }
 
     //TODO: more tests
+    @Test
+    public void getColumnOnClosedResultSetThatHasBeenConsumedOnceThrowsException() throws Throwable {
+        fail("TODO");
+    }
 
     private ResultSet exampleResultSet() throws SQLException {
         ResultSet resultSet = mock(ResultSet.class);
