@@ -1,5 +1,6 @@
 package net.ttddyy.dsproxy.proxy;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -9,6 +10,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static java.lang.Boolean.TRUE;
 import static java.lang.String.format;
 
 public class ResultSetProxyLogic {
@@ -21,7 +23,7 @@ public class ResultSetProxyLogic {
     private boolean resultSetConsumed;
     private boolean closed;
     private Object[] currentResult;
-    private final List<Object[]> allResults = new ArrayList<Object[]>();
+    private final List<Object[]> cachedResults = new ArrayList<Object[]>();
 
     private ResultSetProxyLogic(Map<String, Integer> columnNameToIndex, ResultSet target, int columnCount) throws SQLException {
         this.columnNameToIndex = columnNameToIndex;
@@ -59,41 +61,65 @@ public class ResultSetProxyLogic {
             throw new SQLException("Already closed");
         }
         if (resultSetConsumed) {
-            if (isGetMethod(method) && resultPointer >= allResults.size()) {
-                throw new SQLException(format("Result set exhausted. There were %d result(s) only", allResults.size()));
+            if (isGetMethod(method)) {
+                return handleGetMethodUsingCache(args);
             }
-            if (isGetMethod(method) && resultPointer < allResults.size()) {
-                int columnIndex = determineColumnIndex(method, args);
-                return currentResult[columnIndex];
-            }
-            if (isNextMethod(method) && resultPointer < allResults.size() - 1) {
-                currentResult = allResults.get(resultPointer);
-                resultPointer++;
-                return true;
-            }
-            if (isNextMethod(method) && resultPointer == allResults.size() - 1) {
-                return false;
+            if (isNextMethod(method)) {
+                return handleNextMethodUsingCache();
             }
         } else {
             if (isGetMethod(method)) {
-                int columnIndex = determineColumnIndex(method, args);
-                Object result = method.invoke(target, args);
-                currentResult[columnIndex] = result;
-                return result;
+                return handleGetMethodByDelegating(method, args);
             }
             if (isNextMethod(method)) {
-                Object result = method.invoke(target, args);
-                currentResult = new Object[columnCount + 1];
-                allResults.add(currentResult);
-                return result;
+                return handleNextMethodByDelegating(method, args);
             }
             if (isBeforeFirstMethod(method)) {
-                resultPointer = 0;
+                resultPointer = -1;
                 resultSetConsumed = true;
                 return null;
             }
         }
         throw new UnsupportedOperationException(format("Method '%s' is not supported by this proxy", method));
+    }
+
+    private Object handleNextMethodByDelegating(Method method, Object[] args) throws IllegalAccessException, InvocationTargetException {
+        Object result = method.invoke(target, args);
+        if (TRUE.equals(result)) {
+            currentResult = new Object[columnCount + 1];
+            cachedResults.add(currentResult);
+        }
+        return result;
+    }
+
+    private Object handleGetMethodByDelegating(Method method, Object[] args) throws SQLException, IllegalAccessException, InvocationTargetException {
+        int columnIndex = determineColumnIndex(args);
+        Object result = method.invoke(target, args);
+        currentResult[columnIndex] = result;
+        return result;
+    }
+
+    private Object handleNextMethodUsingCache() {
+        if (resultPointer < cachedResults.size() - 1) {
+            resultPointer++;
+            currentResult = cachedResults.get(resultPointer);
+            return true;
+        } else {
+            resultPointer++;
+            currentResult = null;
+            return false;
+        }
+    }
+
+    private Object handleGetMethodUsingCache(Object[] args) throws SQLException {
+        if (resultPointer == -1) {
+            throw new SQLException("Result set not advanced. Call next before any get method!");
+        } else if (resultPointer < cachedResults.size()) {
+            int columnIndex = determineColumnIndex(args);
+            return currentResult[columnIndex];
+        } else {
+            throw new SQLException(format("Result set exhausted. There were %d result(s) only", cachedResults.size()));
+        }
     }
 
     private boolean isCloseMethod(Method method) {
@@ -120,39 +146,21 @@ public class ResultSetProxyLogic {
         return method.getName().equals("beforeFirst");
     }
 
-    private int determineColumnIndex(Method method, Object[] args) {
-        Integer columnIndex = columnIndexParameter(args);
-        if (columnIndex != null) {
-            return columnIndex;
+    private int determineColumnIndex(Object[] args) throws SQLException {
+        Object lookup = args[0];
+        if (lookup instanceof Integer) {
+            return (Integer) lookup;
         }
-        String columnName = columnNameParameter(args);
-        if (columnName != null) {
-            return columnNameToIndex(columnName);
+        String columnName = (String) lookup;
+        Integer indexForColumnName = columnNameToIndex(columnName);
+        if (indexForColumnName != null) {
+            return indexForColumnName;
+        } else {
+            throw new SQLException(format("Unknown column name '%s'", columnName));
         }
-        throw new IllegalStateException(format("Could not determine column index for method '%s'", method));
     }
 
-    private Integer columnNameToIndex(String s) {
-        return columnNameToIndex.get(s.toUpperCase());
-    }
-
-    // assumed to be the first int parameter
-    private Integer columnIndexParameter(Object[] args) {
-        for (Object arg : args) {
-            if (arg instanceof Integer) {
-                return (Integer) arg;
-            }
-        }
-        return null;
-    }
-
-    // assumed to be the first String parameter
-    private String columnNameParameter(Object[] args) {
-        for (Object arg : args) {
-            if (arg instanceof String) {
-                return (String) arg;
-            }
-        }
-        return null;
+    private Integer columnNameToIndex(String columnName) {
+        return columnNameToIndex.get(columnName.toUpperCase());
     }
 }
