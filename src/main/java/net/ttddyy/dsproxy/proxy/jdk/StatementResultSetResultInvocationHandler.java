@@ -1,10 +1,7 @@
 package net.ttddyy.dsproxy.proxy.jdk;
 
-import net.ttddyy.dsproxy.proxy.ProxyJdbcObject;
-
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
@@ -15,16 +12,12 @@ import java.sql.Statement;
  *
  * @author Liam Williams
  */
-class ResultSetResultInvocationHandler<T extends Statement> implements InvocationHandler {
+class StatementResultSetResultInvocationHandler<T extends Statement> implements InvocationHandler {
 
     private final T target;
 
-    private ResultSetResultInvocationHandler(T target) {
+    StatementResultSetResultInvocationHandler(T target) {
         this.target = target;
-    }
-
-    public static <T extends Statement> T resultSetResultProxy(T target, Class<T> interfaceToProxy) {
-        return interfaceToProxy.cast(Proxy.newProxyInstance(ProxyJdbcObject.class.getClassLoader(), new Class<?>[]{ProxyJdbcObject.class, interfaceToProxy}, new ResultSetResultInvocationHandler<T>(target)));
     }
 
     @Override
